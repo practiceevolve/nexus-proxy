@@ -29,7 +29,7 @@ import static org.junit.Assert.assertEquals;
 
 @RunWith(PowerMockRunner.class)
 @PowerMockRunnerDelegate(VertxUnitRunner.class)
-@PrepareForTest(CloudIamAuthNexusProxyVerticle.class)
+@PrepareForTest(IamAuthNexusProxyVerticle.class)
 public class CloudIamAuthNexusProxyVerticleTests {
     private static final String HOST = "localhost";
     private static final int PORT = findRandomUnusedPort();
@@ -69,7 +69,7 @@ public class CloudIamAuthNexusProxyVerticleTests {
         VARS.entrySet().stream().forEach(e -> PowerMockito.when(System.getenv(e.getKey())).thenReturn(e.getValue()));
 
         this.vertx = Vertx.vertx();
-        this.vertx.deployVerticle(CloudIamAuthNexusProxyVerticle.class.getName(), context.asyncAssertSuccess());
+        this.vertx.deployVerticle(IamAuthNexusProxyVerticle.class.getName(), context.asyncAssertSuccess());
     }
 
     @After

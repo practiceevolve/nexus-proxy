@@ -15,7 +15,7 @@ public class Main {
 
     public static void main(String[] args) {
         Vertx.vertx().deployVerticle(
-                CLOUD_IAM_AUTH_ENABLED ? new CloudIamAuthNexusProxyVerticle() : new UnauthenticatedNexusProxyVerticle()
+                CLOUD_IAM_AUTH_ENABLED ? new IamAuthNexusProxyVerticle() : new UnauthenticatedNexusProxyVerticle()
         );
     }
 }
