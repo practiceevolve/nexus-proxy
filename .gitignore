@@ -4,3 +4,4 @@
 .secrets/
 .vertx/
 build/
+.env

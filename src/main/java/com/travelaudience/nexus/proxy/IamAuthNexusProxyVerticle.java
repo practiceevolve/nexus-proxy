@@ -1,15 +1,19 @@
 package com.travelaudience.nexus.proxy;
 
+import com.google.api.client.auth.oauth2.*;
+import com.google.api.client.http.*;
+import com.google.api.client.http.javanet.*;
+import com.google.api.client.json.jackson2.*;
 import static com.travelaudience.nexus.proxy.ContextKeys.HAS_AUTHORIZATION_HEADER;
 import static com.travelaudience.nexus.proxy.Paths.ALL_PATHS;
 import static com.travelaudience.nexus.proxy.Paths.ROOT_PATH;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleTokenResponse;
 import com.google.api.client.util.Base64;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
 import com.google.common.net.MediaType;
 import com.google.common.primitives.Ints;
+
 import io.vertx.core.Context;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpHeaders;
@@ -20,26 +24,27 @@ import io.vertx.ext.web.handler.CookieHandler;
 import io.vertx.ext.web.handler.SessionHandler;
 import io.vertx.ext.web.handler.VirtualHostHandler;
 import io.vertx.ext.web.sstore.LocalSessionStore;
+
+import java.io.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.UncheckedIOException;
 import java.util.Optional;
 
 /**
  * A verticle which implements a simple proxy for authenticating Nexus users against Google Cloud IAM.
  */
-public class CloudIamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
-    private static final Logger LOGGER = LoggerFactory.getLogger(CloudIamAuthNexusProxyVerticle.class);
+public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
+    private static final Logger LOGGER = LoggerFactory.getLogger(IamAuthNexusProxyVerticle.class);
 
     private static final Integer AUTH_CACHE_TTL = Ints.tryParse(System.getenv("AUTH_CACHE_TTL"));
     private static final String CLIENT_ID = System.getenv("CLIENT_ID");
     private static final String CLIENT_SECRET = System.getenv("CLIENT_SECRET");
+    private static final String TOKEN_ENDPOINT = System.getenv("TOKEN_ENDPOINT");
+    private static final String AUTHORIZE_ENDPOINT = System.getenv("AUTHORIZE_ENDPOINT");
     private static final String KEYSTORE_PATH = System.getenv("KEYSTORE_PATH");
     private static final String KEYSTORE_PASS = System.getenv("KEYSTORE_PASS");
-    // JWT_REQUIRES_MEMBERSHIP_VERIFICATION indicates whether a user presenting a valid JWT token must still be verified for membership within the organization.
-    private static final Boolean JWT_REQUIRES_MEMBERSHIP_VERIFICATION = Boolean.parseBoolean(System.getenv("JWT_REQUIRES_MEMBERSHIP_VERIFICATION"));
-    private static final String ORGANIZATION_ID = System.getenv("ORGANIZATION_ID");
+
     private static final String REDIRECT_URL = System.getenv("REDIRECT_URL");
     private static final Integer SESSION_TTL = Ints.tryParse(System.getenv("SESSION_TTL"));
 
@@ -87,7 +92,7 @@ public class CloudIamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
             HttpHeaders.createOptimized("Basic Realm=\"nexus-proxy\"");
 
 
-    private CachingGoogleAuthCodeFlow flow;
+    private AuthorizationCodeFlow authCodeFlow;
     private JwtAuth jwtAuth;
 
     @Override
@@ -95,13 +100,15 @@ public class CloudIamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
                      final Context context) {
         super.init(vertx, context);
 
-        this.flow = CachingGoogleAuthCodeFlow.create(
-                AUTH_CACHE_TTL,
+        this.authCodeFlow = new AuthorizationCodeFlow.Builder(
+                BearerToken.authorizationHeaderAccessMethod(),
+                new NetHttpTransport(),
+                new JacksonFactory(),
+                new GenericUrl(TOKEN_ENDPOINT),
+                new BasicAuthentication(CLIENT_ID, CLIENT_SECRET),
                 CLIENT_ID,
-                CLIENT_SECRET,
-                ORGANIZATION_ID,
-                REDIRECT_URL
-        );
+                AUTHORIZE_ENDPOINT)
+                .build();
 
         this.jwtAuth = JwtAuth.create(
                 vertx,
@@ -148,38 +155,30 @@ public class CloudIamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
 
         // Configure the callback used by the OAuth2 consent screen.
         router.route(CALLBACK_PATH).handler(ctx -> {
-            final String authorizationUri = flow.buildAuthorizationUri();
+            String authorizationUri = buildAuthorizationUri();
 
-            // Check if the request contains an authentication code.
-            // If it doesn't, redirect to the OAuth2 consent screen.
             if (!ctx.request().params().contains(AUTH_CODE_PARAM_NAME)) {
                 LOGGER.debug("No authentication code found. Redirecting to consent screen.");
                 ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, authorizationUri).end();
                 return;
             }
 
-            // The request contains an authentication code.
-            // We must now use it to request an access token for the user and know their identity.
-            final GoogleTokenResponse token;
-            final String principal;
-
+            String principal;
+            TokenResponse tokenResponse;
             try {
-                LOGGER.debug("Requesting access token from Google.");
-                token = flow.requestToken(ctx.request().params().get(AUTH_CODE_PARAM_NAME));
-                flow.storeCredential(token);
-                principal = flow.getPrincipal(token);
-                LOGGER.debug("Got access token for principal {}.", principal);
-            } catch (final UncheckedIOException ex) {
-                // We've failed to request the access token.
-                // Our best bet is to redirect the user back to the consent screen so the process can be retried.
-                LOGGER.error("Couldn't request access token from Google. Redirecting to consent screen.", ex);
+                tokenResponse = exchangeAuthCodeForToken(ctx);
+                principal = principalFromTokenResponse(tokenResponse);
+                storeCredential(tokenResponse, principal);
+                LOGGER.debug("Got access tokenResponse for principal {}.", principal);
+            } catch (final UncheckedIOException  ex) {
+                LOGGER.error("Couldn't request access tokenResponse from IAM. Redirecting to consent screen.", ex);
                 ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, authorizationUri).end();
                 return;
             }
 
-            // We've got the required access token, so we redirect the user to the root.
             LOGGER.debug("Redirecting principal {} to {}.", principal, ROOT_PATH);
             ctx.session().put(SessionKeys.USER_ID, principal);
+            // TODO: get originally requested route (maybe from context?) and redirect there
             ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, ROOT_PATH).end();
         });
 
@@ -249,46 +248,18 @@ public class CloudIamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
             }
 
             // At this point we've got a valid principal.
-            // We should, however, still check whether they are (still) a member of the organization (unless this check is explicitly disabled).
+            // We should, however, check whether they are (still) a member of the organization (unless this check is explicitly disabled).
             // This is done mostly to prevent long-lived JWT tokens from being used after a user leaves the organization.
-
-            final Boolean hasAuthorizationHeader = ((Boolean) ctx.data().getOrDefault(HAS_AUTHORIZATION_HEADER, false));
-
-            // If there is an authorization header but membership verification is not required, skip the remaining of this handler.
-            if (hasAuthorizationHeader && !JWT_REQUIRES_MEMBERSHIP_VERIFICATION) {
-                LOGGER.debug("{} has a valid auth token but is not an organization member. Allowing since membership verification is not required.", userId);
+            // see original code from travelaudience
+            // https://github.com/travelaudience/nexus-proxy/blob/master/src/main/java/com/travelaudience/nexus/proxy/CloudIamAuthNexusProxyVerticle.java
+            // if needed, implement this `authorize` method with something other than `return true`
+            if (this.authorize(userId, ctx)) {
                 ctx.next();
                 return;
             }
 
-            // Check if the user is still a member of the organization.
-            boolean isOrganizationMember = false;
-
-            try {
-                LOGGER.debug("Checking organization membership for principal {}.", userId);
-                isOrganizationMember = flow.isOrganizationMember(userId);
-                LOGGER.debug("Principal is organization member: {}.", isOrganizationMember);
-            } catch (final UncheckedIOException ex) {
-                // Destroy the user's session in case of an error while validating membership.
-                ctx.session().destroy();
-                LOGGER.error("Couldn't check membership for {}. Their session has been destroyed.", userId, ex);
-            }
-
-            // Make a decision based on whether the user is an organization member.
-            // If they aren't, decide based on the presence of the authorization header (indicating either a CLI flow or a UI flow).
-            if (isOrganizationMember) {
-                // The user is an organization member. Allow the request.
-                LOGGER.debug("{} is organization member. Allowing.", userId);
-                ctx.next();
-            } else if (hasAuthorizationHeader) {
-                // The user is not an organization member (or membership couldn't be verified) AND is most probably using a CLI tool. Deny the request.
-                LOGGER.debug("{} is not an organization member. Denying.", userId);
-                ctx.response().setStatusCode(403).end();
-            } else {
-                // The user is not an organization member AND is most probably browsing Nexus UI. Redirect to the callback.
-                LOGGER.debug("{} does not have an auth token and is not an organization member. Redirecting to {}.", userId, CALLBACK_PATH);
-                ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, CALLBACK_PATH).end();
-            }
+            LOGGER.debug("{} is not authorized. Denying.", userId);
+            ctx.response().setStatusCode(403).end();
         });
 
         // Configure the path from where a JWT token can be obtained.
@@ -304,6 +275,44 @@ public class CloudIamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
             ctx.response().putHeader(HttpHeaders.CONTENT_TYPE, MediaType.JSON_UTF_8.toString()).end(body.encode());
         });
     }
+
+    private boolean authorize(String userId, RoutingContext ctx) {
+        return true;
+    }
+
+    private void storeCredential(TokenResponse tokenResponse, String principal) {
+        try {
+            authCodeFlow.createAndStoreCredential(tokenResponse, principal);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private String principalFromTokenResponse(TokenResponse tokenResponse) {
+        try {
+            return new AccessToken(tokenResponse.getAccessToken()).principal();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private TokenResponse exchangeAuthCodeForToken(RoutingContext ctx) {
+        try {
+            return authCodeFlow
+                    .newTokenRequest(ctx.request().params().get(AUTH_CODE_PARAM_NAME)).setRedirectUri(REDIRECT_URL)
+                    .execute();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private String buildAuthorizationUri() {
+        return authCodeFlow
+                .newAuthorizationUrl()
+                .setRedirectUri(REDIRECT_URL)
+                .build();
+    }
+
 
     @Override
     protected String getUserId(final RoutingContext ctx) {
