@@ -18,4 +18,9 @@ public class UnauthenticatedNexusProxyVerticle extends BaseNexusProxyVerticle {
     protected String getUserId(final RoutingContext ctx) {
         return null;
     }
+
+    @Override
+    protected String getAccessToken(RoutingContext ctx) {
+        return null;
+    }
 }

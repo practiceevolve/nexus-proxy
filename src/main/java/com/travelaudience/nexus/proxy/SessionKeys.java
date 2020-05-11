@@ -10,6 +10,7 @@ public final class SessionKeys {
      * The key that holds the currently authenticated user's ID.
      */
     public static final String USER_ID = "user-id";
+    public static final String ACCESS_TOKEN = "access-token";
 
     private SessionKeys() {
     }
