@@ -1,7 +1,7 @@
 package com.travelaudience.nexus.proxy;
 
 import com.google.api.client.json.webtoken.JsonWebToken;
-import com.google.api.client.util.*;
+import com.google.api.client.util.Key;
 
 public class PayloadWithEmail extends JsonWebToken.Payload {
     @Key("email")

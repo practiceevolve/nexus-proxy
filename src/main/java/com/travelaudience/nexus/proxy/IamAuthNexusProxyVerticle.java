@@ -1,16 +1,26 @@
 package com.travelaudience.nexus.proxy;
 
-import com.google.api.client.auth.oauth2.*;
-import com.google.api.client.http.*;
-import com.google.api.client.http.javanet.*;
-import com.google.api.client.json.jackson2.*;
+import com.auth0.jwk.Jwk;
+import com.auth0.jwk.JwkException;
+import com.auth0.jwk.JwkProvider;
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.algorithms.Algorithm;
+import com.auth0.jwt.exceptions.SignatureVerificationException;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.google.api.client.auth.oauth2.AuthorizationCodeFlow;
+import com.google.api.client.auth.oauth2.BearerToken;
+import com.google.api.client.auth.oauth2.TokenResponse;
+import com.google.api.client.http.BasicAuthentication;
+import com.google.api.client.http.GenericUrl;
+import com.google.api.client.http.javanet.NetHttpTransport;
+
+import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.util.Base64;
 import static com.travelaudience.nexus.proxy.ContextKeys.HAS_AUTHORIZATION_HEADER;
 import static com.travelaudience.nexus.proxy.Paths.ALL_PATHS;
 import static com.travelaudience.nexus.proxy.Paths.ROOT_PATH;
 
-import com.google.api.client.util.Base64;
 import com.google.common.base.Charsets;
-import com.google.common.collect.ImmutableList;
 import com.google.common.net.MediaType;
 import com.google.common.primitives.Ints;
 
@@ -25,11 +35,14 @@ import io.vertx.ext.web.handler.SessionHandler;
 import io.vertx.ext.web.handler.VirtualHostHandler;
 import io.vertx.ext.web.sstore.LocalSessionStore;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.security.interfaces.RSAPublicKey;
+import java.util.Calendar;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Optional;
 
 /**
  * A verticle which implements a simple proxy for authenticating Nexus users against Google Cloud IAM.
@@ -37,13 +50,10 @@ import java.util.Optional;
 public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(IamAuthNexusProxyVerticle.class);
 
-    private static final Integer AUTH_CACHE_TTL = Ints.tryParse(System.getenv("AUTH_CACHE_TTL"));
     private static final String CLIENT_ID = System.getenv("CLIENT_ID");
     private static final String CLIENT_SECRET = System.getenv("CLIENT_SECRET");
     private static final String TOKEN_ENDPOINT = System.getenv("TOKEN_ENDPOINT");
     private static final String AUTHORIZE_ENDPOINT = System.getenv("AUTHORIZE_ENDPOINT");
-    private static final String KEYSTORE_PATH = System.getenv("KEYSTORE_PATH");
-    private static final String KEYSTORE_PASS = System.getenv("KEYSTORE_PASS");
 
     private static final String REDIRECT_URL = System.getenv("REDIRECT_URL");
     private static final Integer SESSION_TTL = Ints.tryParse(System.getenv("SESSION_TTL"));
@@ -56,10 +66,8 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
      * The path that corresponds to the URL where users may get their CLI credentials from.
      */
     private static final String CLI_CREDENTIALS_PATH = "/cli/credentials";
-    /**
-     * The path that corresponds to all possible paths within the Nexus Docker registry.
-     */
-    private static final String DOCKER_V2_API_PATHS = "/v2/*";
+    private static final String CLI_CREDENTIALS_PATH_GRADLE = "/cli/credentials/gradle";
+    private static final String CLI_CREDENTIALS_PATH_NPM = "/cli/credentials/npm";
     /**
      * The path that corresponds to all possible paths within the Nexus Maven repositories.
      */
@@ -92,8 +100,10 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
             HttpHeaders.createOptimized("Basic Realm=\"nexus-proxy\"");
 
 
+    private static final String JWK_URL = System.getenv("JWK_URL");
+
+
     private AuthorizationCodeFlow authCodeFlow;
-    private JwtAuth jwtAuth;
 
     @Override
     public void init(final Vertx vertx,
@@ -109,13 +119,6 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
                 CLIENT_ID,
                 AUTHORIZE_ENDPOINT)
                 .build();
-
-        this.jwtAuth = JwtAuth.create(
-                vertx,
-                KEYSTORE_PATH,
-                KEYSTORE_PASS,
-                ImmutableList.of(nexusDockerHost, nexusHttpHost)
-        );
     }
 
     @Override
@@ -126,20 +129,6 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
 
     @Override
     protected void configureRouting(Router router) {
-        // Enforce authentication for the Docker API.
-        router.route(DOCKER_V2_API_PATHS).handler(VirtualHostHandler.create(nexusDockerHost, ctx -> {
-            if (ctx.request().headers().get(HttpHeaders.AUTHORIZATION) == null) {
-                LOGGER.debug("No authorization header found. Denying.");
-                ctx.response().putHeader(WWW_AUTHENTICATE_HEADER_NAME, WWW_AUTHENTICATE_HEADER_VALUE);
-                ctx.response().putHeader(DOCKER_DISTRIBUTION_API_VERSION_NAME, DOCKER_DISTRIBUTION_API_VERSION_VALUE);
-                ctx.fail(401);
-            } else {
-                LOGGER.debug("Authorization header found.");
-                ctx.data().put(HAS_AUTHORIZATION_HEADER, true);
-                ctx.next();
-            }
-        }));
-
         // Enforce authentication for the Nexus UI and API.
         router.route(NEXUS_REPOSITORY_PATHS).handler(VirtualHostHandler.create(nexusHttpHost, ctx -> {
             if (ctx.request().headers().get(HttpHeaders.AUTHORIZATION) == null) {
@@ -170,7 +159,7 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
                 principal = principalFromTokenResponse(tokenResponse);
                 storeCredential(tokenResponse, principal);
                 LOGGER.debug("Got access tokenResponse for principal {}.", principal);
-            } catch (final UncheckedIOException  ex) {
+            } catch (final UncheckedIOException ex) {
                 LOGGER.error("Couldn't request access tokenResponse from IAM. Redirecting to consent screen.", ex);
                 ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, authorizationUri).end();
                 return;
@@ -178,7 +167,7 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
 
             LOGGER.debug("Redirecting principal {} to {}.", principal, ROOT_PATH);
             ctx.session().put(SessionKeys.USER_ID, principal);
-            // TODO: get originally requested route (maybe from context?) and redirect there
+            ctx.session().put(SessionKeys.ACCESS_TOKEN, tokenResponse.getAccessToken());
             ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, ROOT_PATH).end();
         });
 
@@ -203,7 +192,7 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
                 ctx.next();
                 return;
             }
-            if (!"Basic".equals(parts[0])) {
+            if (!"Basic".equals(parts[0]) && !"Bearer".equals(parts[0])) {
                 ctx.next();
                 return;
             }
@@ -221,17 +210,33 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
                 password = credentials;
             }
 
-            // Validate the password as a JWT token.
-            jwtAuth.validate(password, userId -> {
-                if (userId == null) {
-                    LOGGER.debug("Got invalid JWT token. Denying.");
-                    ctx.response().setStatusCode(403).end();
-                } else {
-                    LOGGER.debug("Got valid JWT token for principal {}.", userId);
-                    ctx.data().put(SessionKeys.USER_ID, userId);
-                    ctx.next();
-                }
-            });
+            DecodedJWT token = JWT.decode(password);
+
+            // verify token
+            try {
+                verifyToken(token);
+            } catch (SignatureVerificationException e) {
+                LOGGER.debug("Token is invalid, redirecting to {}", CALLBACK_PATH);
+                ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, CALLBACK_PATH).end();
+                return;
+            }
+
+            if (token.getExpiresAt().before(Calendar.getInstance().getTime())) {
+                LOGGER.debug("Token is expired, redirecting to {}", CALLBACK_PATH);
+                ctx.response().setStatusCode(302).putHeader(HttpHeaders.LOCATION, CALLBACK_PATH).end();
+                return;
+            }
+
+            String userId;
+            try {
+                userId = new AccessToken(password).principal();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
+            ctx.data().put(SessionKeys.USER_ID, userId);
+            ctx.data().put(SessionKeys.ACCESS_TOKEN, password);
+            ctx.next();
         });
 
         // Configure routing for all paths.
@@ -264,18 +269,55 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
 
         // Configure the path from where a JWT token can be obtained.
         router.get(CLI_CREDENTIALS_PATH).produces(MediaType.JSON_UTF_8.toString()).handler(ctx -> {
-            final String userId = ctx.session().get(SessionKeys.USER_ID);
-
-            LOGGER.debug("Generating JWT token for principal {}.", userId);
+            JsonObject raw = rawUserIdAndToken(ctx);
+            JsonObject base64 = userIdAndTokenAsBase64String(ctx);
 
             final JsonObject body = new JsonObject()
-                    .put("username", userId)
-                    .put("password", jwtAuth.generate(userId));
+                    .put("gradle", raw)
+                    .put("npm", base64);
 
             ctx.response().putHeader(HttpHeaders.CONTENT_TYPE, MediaType.JSON_UTF_8.toString()).end(body.encode());
         });
+
+        router.get(CLI_CREDENTIALS_PATH_GRADLE).produces(MediaType.JSON_UTF_8.toString()).handler(ctx -> {
+            ctx.response()
+                    .putHeader(HttpHeaders.CONTENT_TYPE, MediaType.JSON_UTF_8.toString())
+                    .end(rawUserIdAndToken(ctx).encode());
+        });
+
+        router.get(CLI_CREDENTIALS_PATH_NPM).produces(MediaType.JSON_UTF_8.toString()).handler(ctx -> {
+            ctx.response()
+                    .putHeader(HttpHeaders.CONTENT_TYPE, MediaType.JSON_UTF_8.toString())
+                    .end(userIdAndTokenAsBase64String(ctx).encode());
+        });
     }
 
+    private void verifyToken(DecodedJWT token) {
+        try {
+            JwkProvider provider =
+                    new KeycloakJwkProvider(JWK_URL);
+
+            Jwk jwk = provider.get(token.getKeyId());
+            Algorithm rsa256 = Algorithm.RSA256((RSAPublicKey) jwk.getPublicKey(), null);
+            rsa256.verify(token);
+        } catch (JwkException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private JsonObject rawUserIdAndToken(RoutingContext ctx) {
+        return new JsonObject()
+                .put("nexusUsername", getUserId(ctx))
+                .put("nexusPassword", getAccessToken(ctx));
+    }
+
+    private JsonObject userIdAndTokenAsBase64String(RoutingContext ctx) {
+        return new JsonObject()
+                .put("_authToken", Base64.encodeBase64String(
+                        String.format("%s:%s", getUserId(ctx), getAccessToken(ctx)).getBytes()));
+    }
+
+    @SuppressWarnings("unused")
     private boolean authorize(String userId, RoutingContext ctx) {
         return true;
     }
@@ -321,5 +363,11 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
         ).orElse(
                 ctx.session().get(SessionKeys.USER_ID)
         );
+    }
+
+    @Override
+    protected String getAccessToken(final RoutingContext ctx) {
+        return Optional.ofNullable((String) ctx.data().get(SessionKeys.ACCESS_TOKEN))
+                .orElse(ctx.session().get(SessionKeys.ACCESS_TOKEN));
     }
 }

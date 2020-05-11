@@ -1,8 +1,8 @@
 package com.travelaudience.nexus.proxy;
 
-import com.google.api.client.json.jackson2.*;
-import com.google.api.client.json.webtoken.*;
-import java.io.*;
+import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.json.webtoken.JsonWebSignature;
+import java.io.IOException;
 
 public class AccessToken {
     private final String rawToken;

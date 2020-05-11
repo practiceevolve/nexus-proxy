@@ -27,11 +27,10 @@ public final class NexusHttpProxy {
 
     private NexusHttpProxy(final Vertx vertx,
                            final String host,
-                           final int port,
-                           final String nexusRutHeader) {
+                           final int port) {
         this.host = host;
         this.httpClient = vertx.createHttpClient();
-        this.nexusRutHeader = nexusRutHeader;
+        this.nexusRutHeader = "X-Auth-Username";
         this.port = port;
     }
 
@@ -41,14 +40,12 @@ public final class NexusHttpProxy {
      * @param vertx          the base {@link Vertx} instance.
      * @param host           the host we will be proxying to.
      * @param port           the port we will be proxying to.
-     * @param nexusRutHeader the name of the RUT authentication header as configured in Nexus.
      * @return a new instance of {@link NexusHttpProxy}.
      */
     public static final NexusHttpProxy create(final Vertx vertx,
                                               final String host,
-                                              final int port,
-                                              final String nexusRutHeader) {
-        return new NexusHttpProxy(vertx, host, port, nexusRutHeader);
+                                              final int port) {
+        return new NexusHttpProxy(vertx, host, port);
     }
 
     /**
@@ -59,12 +56,14 @@ public final class NexusHttpProxy {
      * @param origRes the original response (i.e., {@link RoutingContext#request()}.
      */
     public void proxyUserRequest(final String userId,
+                                 final String accessToken,
                                  final HttpServerRequest origReq,
                                  final HttpServerResponse origRes) {
         final Handler<HttpClientResponse> proxiedResHandler = proxiedRes -> {
             origRes.setChunked(true);
             origRes.setStatusCode(proxiedRes.statusCode());
             origRes.headers().setAll(proxiedRes.headers());
+            origRes.headers().remove(HttpHeaders.CONTENT_LENGTH);
             proxiedRes.handler(origRes::write);
             proxiedRes.endHandler(v -> origRes.end());
         };
@@ -78,6 +77,8 @@ public final class NexusHttpProxy {
         proxiedReq.headers().add(X_FORWARDED_PROTO, getHeader(origReq, X_FORWARDED_PROTO, origReq.scheme()));
         proxiedReq.headers().add(X_FORWARDED_FOR, getHeader(origReq, X_FORWARDED_FOR, origReq.remoteAddress().host()));
         proxiedReq.headers().addAll(origReq.headers());
+        proxiedReq.headers().add("X-Auth-Token", accessToken);
+        proxiedReq.headers().remove(HttpHeaders.CONTENT_LENGTH);
         injectRutHeader(proxiedReq, userId);
         origReq.handler(proxiedReq::write);
         origReq.endHandler(v -> proxiedReq.end());
