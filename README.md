@@ -65,6 +65,6 @@ $ BIND_PORT="8080" \
 | `SESSION_TTL`                       | The TTL (in _milliseconds_) of a user's session. |
 | `UPSTREAM_HTTP_PORT`                | The port where the proxied Nexus instance listens. |
 | `UPSTREAM_HOST`                     | The host where the proxied Nexus instance listens. |
-| `AUTHORIZE_ENDPOINT`                | The OAuth2/OpenID auth endpoint for the Authorize Flow |   
+| `AUTHORIZE_ENDPOINT`                | The OAuth2/OpenID auth endpoint for the Authorize Flow |
 | `TOKEN_ENDPOINT`                    | The OAuth2/OpenID token endpoint for the Authorize Flow |
 | `JWK_URL`                           | URL where the server can receive the IDP's JWK. Needed for verifying the tokens signature.  |
