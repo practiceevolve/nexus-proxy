@@ -5,7 +5,7 @@ WORKDIR /src/
 RUN gradle --debug --no-daemon shadowJar
 
 # -- run
-FROM openjdk:8-jre-alpine
+FROM gcr.io/distroless/java:8
 
 ENV BIND_PORT "80"
 ENV CLIENT_ID "REPLACE_ME"
