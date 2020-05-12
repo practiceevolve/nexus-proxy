@@ -22,9 +22,6 @@ ENV BIND_PORT="80" \
 
 COPY --from=builder /src/build/libs/nexus-proxy-2.3.0.jar /nexus-proxy.jar
 
-EXPOSE 8080
-EXPOSE 8443
+EXPOSE 8080 8443
 
-CMD ["-jar", "/nexus-proxy.jar"]
-
-ENTRYPOINT ["java"]
+CMD ["/nexus-proxy.jar"]
