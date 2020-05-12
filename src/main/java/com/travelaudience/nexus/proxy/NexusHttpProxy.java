@@ -77,7 +77,9 @@ public final class NexusHttpProxy {
         proxiedReq.headers().add(X_FORWARDED_PROTO, getHeader(origReq, X_FORWARDED_PROTO, origReq.scheme()));
         proxiedReq.headers().add(X_FORWARDED_FOR, getHeader(origReq, X_FORWARDED_FOR, origReq.remoteAddress().host()));
         proxiedReq.headers().addAll(origReq.headers());
-        proxiedReq.headers().add("X-Auth-Token", accessToken);
+        if (accessToken != null) {
+            proxiedReq.headers().add("X-Auth-Token", accessToken);
+        }
         proxiedReq.headers().remove(HttpHeaders.CONTENT_LENGTH);
         injectRutHeader(proxiedReq, userId);
         origReq.handler(proxiedReq::write);
