@@ -56,6 +56,7 @@ public final class NexusHttpProxy {
      * Proxies the specified HTTP request, enriching its headers with authentication information.
      *
      * @param userId  the ID of the user making the request.
+     * @param accessToken the validated JWT token
      * @param origReq the original request (i.e., {@link RoutingContext#request()}.
      * @param origRes the original response (i.e., {@link RoutingContext#request()}.
      */
@@ -81,12 +82,17 @@ public final class NexusHttpProxy {
         proxiedReq.headers().add(X_FORWARDED_PROTO, getHeader(origReq, X_FORWARDED_PROTO, origReq.scheme()));
         proxiedReq.headers().add(X_FORWARDED_FOR, getHeader(origReq, X_FORWARDED_FOR, origReq.remoteAddress().host()));
         proxiedReq.headers().addAll(origReq.headers());
-        if (!passThruAuthHeader) {
+        
+        // Don't pass auth header to upstream if there's a valid JWT
+        if (!passThruAuthHeader || accessToken != null) {
             proxiedReq.headers().remove(HttpHeaders.AUTHORIZATION);
         }
+        
+        // Always include valid JWT in header
         if (accessToken != null) {
             proxiedReq.headers().add("X-Auth-Token", accessToken);
         }
+
         proxiedReq.headers().remove(HttpHeaders.CONTENT_LENGTH);
         injectRutHeader(proxiedReq, userId);
         origReq.handler(proxiedReq::write);

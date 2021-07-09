@@ -108,8 +108,7 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
             HttpHeaders.createOptimized("Basic Realm=\"nexus-proxy\"");
 
 
-    private static final String JWK_URL = System.getenv("JWK_URL");
-
+    private static final String APIKEY_USERNAME = "apikey";
 
     private AuthorizationCodeFlow authCodeFlow;
 
@@ -215,41 +214,59 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
             final String credentials = new String(Base64.decodeBase64(parts[1]), Charsets.UTF_8);
             final int colonIdx = credentials.indexOf(":");
 
-            final String password;
+            String userId = null, token = null;
 
             if (colonIdx != -1) {
-                password = credentials.substring(colonIdx + 1);
+                // BASIC, check if username is 'apikey'
+                userId = credentials.substring(0, colonIdx);
+                if (!APIKEY_USERNAME.equals(userId)) {
+                    if (!PASSTHRU_AUTH_HEADER) {
+                        LOGGER.debug("Username is not apikey, and PASSTHRU_AUTH_HEADER is not set, failing");
+                        ctx.response().setStatusCode(401).setStatusMessage("(Unauthorized)").end("Either specify apikey as username with a token from /cli/credentials, or enable PASSTHRU_AUTH_HEADER to let NXRM do authentication");
+                    }
+                } else {
+                    // the password is the JWT
+                    token = credentials.substring(colonIdx + 1);
+                }
             } else {
-                password = credentials;
+                // BEARER, whole thing is JWT
+                token = credentials;
             }
 
-            DecodedJWT token;
+            if (token != null) {
+                try {
+                    DecodedJWT decodedToken = JWT.decode(token);
 
-            // verify token
-            try {
-                token = JWT.decode(password);
-                verifyToken(token);
-            } catch (Exception e) {
-                LOGGER.debug("Token is invalid", e);
-                ctx.response().setStatusCode(401).setStatusMessage("(Invalid Token)").end("Token is invalid, get another at /cli/credentials");
-                return;
-            }
-
-            if (token.getExpiresAt().before(Calendar.getInstance().getTime())) {
-                LOGGER.debug("Token is expired");
-                ctx.response().setStatusCode(401).setStatusMessage("(Expired Token)").end("Token is expired, get another at /cli/credentials");
-                return;
-            }
-
-            String userId;
-            try {
-                userId = new AccessToken(password).principal(USER_ID_CLAIM);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                    // verify token
+                    try {
+                        verifyToken(decodedToken);
+                    } catch (Exception e) {
+                        LOGGER.debug("JWT is invalid", e);
+                        ctx.response().setStatusCode(401).setStatusMessage("(Invalid Token)").end("Token is invalid, get another at /cli/credentials");
+                        return;
+                    }
+        
+                    if (decodedToken.getExpiresAt().before(Calendar.getInstance().getTime())) {
+                        LOGGER.debug("JWT is expired");
+                        ctx.response().setStatusCode(401).setStatusMessage("(Expired Token)").end("Token is expired, get another at /cli/credentials");
+                        return;
+                    }
+                }
+                catch (Exception e) {
+                    LOGGER.debug("JWT cannot be decoded", e);
+                    ctx.response().setStatusCode(401).setStatusMessage("(Malformed Token)").end("Token is invalid, get another at /cli/credentials");
+                    return;
+                }
+                
+                try {
+                    userId = new AccessToken(token).principal(USER_ID_CLAIM);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                ctx.data().put(SessionKeys.ACCESS_TOKEN, token);
             }
 
             ctx.data().put(SessionKeys.USER_ID, userId);
-            ctx.data().put(SessionKeys.ACCESS_TOKEN, password);
             ctx.next();
         });
 
@@ -313,14 +330,14 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
 
     private JsonObject rawUserIdAndToken(RoutingContext ctx) {
         return new JsonObject()
-                .put("nexusUsername", getUserId(ctx))
-                .put("nexusPassword", getAccessToken(ctx));
+            .put("username", APIKEY_USERNAME)
+            .put("password", getAccessToken(ctx));
     }
 
     private JsonObject userIdAndTokenAsBase64String(RoutingContext ctx) {
         return new JsonObject()
                 .put("_authToken", Base64.encodeBase64String(
-                        String.format("%s:%s", getUserId(ctx), getAccessToken(ctx)).getBytes()));
+                        String.format("%s:%s", APIKEY_USERNAME, getAccessToken(ctx)).getBytes()));
     }
 
     @SuppressWarnings("unused")
@@ -380,6 +397,8 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
     protected String getAccessToken(final RoutingContext ctx) {
         String accessToken = Optional.ofNullable((String) ctx.data().get(SessionKeys.ACCESS_TOKEN))
                 .orElse(ctx.session().get(SessionKeys.ACCESS_TOKEN));
+        if (accessToken == null) return null;
+        
         DecodedJWT decodedToken = JWT.decode(accessToken);
         String encodedToken = JWT.create()
             .withClaim(USER_ID_CLAIM, decodedToken.getClaim(USER_ID_CLAIM).asString())

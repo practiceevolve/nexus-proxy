@@ -23,7 +23,7 @@ ENV BIND_HOST="0.0.0.0" \
     REQUEST_SCOPES="" \
     USER_ID_CLAIM="email" \
     HMAC_SHA256_SECRET="" \
-    PASSTHRU_AUTH_HEADER="false"
+    PASSTHRU_AUTH_HEADER="true"
 
 COPY --from=builder /src/build/libs/nexus-proxy-2.3.0.jar /nexus-proxy.jar
 

@@ -51,7 +51,7 @@ $ BIND_PORT="8080" \
   REQUEST_SCOPES="" \
   USER_ID_CLAIM="email" \
   HMAC_SHA256_SECRET="" \
-  PASSTHRU_AUTH_HEADER="false"
+  PASSTHRU_AUTH_HEADER="true"
   java -jar ./build/libs/nexus-proxy-2.3.0.jar
 ```
 
@@ -76,4 +76,4 @@ $ BIND_PORT="8080" \
 | `REQUEST_SCOPES`                    | Request any additional scopes. The openid scope is always requested |
 | `USER_ID_CLAIM`                     | What claim to use as the user id |
 | `HMAC_SHA256_SECRET`                | String secret used to encrypt JWT tokens created for CLI tools. Leave blank to auto-generate, but they will not survive a restart. |
-| `PASSTHRU_AUTH_HEADER`              | Normally you would not pass through the authentication header to upstream, as it is handled by this proxy. Defaults to 'false' |
+| `PASSTHRU_AUTH_HEADER`              | Specify true to pass Authorization header upstream if user name is not 'apikey' if basic auth header is passed in. Defaults to true. |
