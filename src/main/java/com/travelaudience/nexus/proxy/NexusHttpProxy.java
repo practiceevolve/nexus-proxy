@@ -24,14 +24,17 @@ public final class NexusHttpProxy {
     private final HttpClient httpClient;
     private final String nexusRutHeader;
     private final int port;
+    private final boolean passThruAuthHeader;
 
     private NexusHttpProxy(final Vertx vertx,
                            final String host,
-                           final int port) {
+                           final int port,
+                           final boolean passThruAuthHeader) {
         this.host = host;
         this.httpClient = vertx.createHttpClient();
         this.nexusRutHeader = "X-Auth-Username";
         this.port = port;
+        this.passThruAuthHeader = passThruAuthHeader;
     }
 
     /**
@@ -44,8 +47,9 @@ public final class NexusHttpProxy {
      */
     public static final NexusHttpProxy create(final Vertx vertx,
                                               final String host,
-                                              final int port) {
-        return new NexusHttpProxy(vertx, host, port);
+                                              final int port,
+                                              final boolean passThruAuthHeader) {
+        return new NexusHttpProxy(vertx, host, port, passThruAuthHeader);
     }
 
     /**
@@ -77,6 +81,9 @@ public final class NexusHttpProxy {
         proxiedReq.headers().add(X_FORWARDED_PROTO, getHeader(origReq, X_FORWARDED_PROTO, origReq.scheme()));
         proxiedReq.headers().add(X_FORWARDED_FOR, getHeader(origReq, X_FORWARDED_FOR, origReq.remoteAddress().host()));
         proxiedReq.headers().addAll(origReq.headers());
+        if (!passThruAuthHeader) {
+            proxiedReq.headers().remove(HttpHeaders.AUTHORIZATION);
+        }
         if (accessToken != null) {
             proxiedReq.headers().add("X-Auth-Token", accessToken);
         }

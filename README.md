@@ -25,6 +25,7 @@ For opt-in authentication against an IDP:
 * A properly configured IDP, e.g. Keycloak
 * A set of credentials (`CLIENT_ID` & `CLIENT_SECRET`)
 * OAuth2 Endpoint URLs (`AUTHORIZE_ENDPOINT`, `TOKEN_ENDPOINT`, `JWK_URL`)
+* Scopes and claim, specify the user ID claim, defaults to email (`USER_ID_CLAIM`)
 * Proper configuration of the resulting client's `REDIRECT_URL`.
 
 ## Running the proxy
@@ -47,6 +48,10 @@ $ BIND_PORT="8080" \
   TOKEN_ENDPOINT="https://<sso-base-url>/openid-connect/token" \
   JWK_URL="https://<sso-base-url>/openid-connect/certs" \
   TOKEN_ENDPOINT="https://<sso-base-url>/openid-connect/auth" \
+  REQUEST_SCOPES="" \
+  USER_ID_CLAIM="email" \
+  HMAC_SHA256_SECRET="" \
+  PASSTHRU_AUTH_HEADER="false"
   java -jar ./build/libs/nexus-proxy-2.3.0.jar
 ```
 
@@ -68,3 +73,7 @@ $ BIND_PORT="8080" \
 | `AUTHORIZE_ENDPOINT`                | The OAuth2/OpenID auth endpoint for the Authorize Flow |
 | `TOKEN_ENDPOINT`                    | The OAuth2/OpenID token endpoint for the Authorize Flow |
 | `JWK_URL`                           | URL where the server can receive the IDP's JWK. Needed for verifying the tokens signature.  |
+| `REQUEST_SCOPES`                    | Request any additional scopes. The openid scope is always requested |
+| `USER_ID_CLAIM`                     | What claim to use as the user id |
+| `HMAC_SHA256_SECRET`                | String secret used to encrypt JWT tokens created for CLI tools. Leave blank to auto-generate, but they will not survive a restart. |
+| `PASSTHRU_AUTH_HEADER`              | Normally you would not pass through the authentication header to upstream, as it is handled by this proxy. Defaults to 'false' |

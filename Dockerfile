@@ -7,7 +7,8 @@ RUN gradle --debug --no-daemon shadowJar
 # -- run
 FROM gcr.io/distroless/java:8
 
-ENV BIND_PORT="80" \
+ENV BIND_HOST="0.0.0.0" \
+    BIND_PORT="8080" \
     CLIENT_ID="REPLACE_ME" \
     CLIENT_SECRET="REPLACE_ME" \
     CLOUD_IAM_AUTH_ENABLED="true" \
@@ -18,7 +19,11 @@ ENV BIND_PORT="80" \
     UPSTREAM_HTTP_PORT="8081" \
     JWK_URL="<openid-certs>" \
     TOKEN_ENDPOINT="<openid-token-endpoint>" \
-    AUTHORIZE_ENDPOINT="<openid-authorize-url>"
+    AUTHORIZE_ENDPOINT="<openid-authorize-url>" \
+    REQUEST_SCOPES="" \
+    USER_ID_CLAIM="email" \
+    HMAC_SHA256_SECRET="" \
+    PASSTHRU_AUTH_HEADER="false"
 
 COPY --from=builder /src/build/libs/nexus-proxy-2.3.0.jar /nexus-proxy.jar
 
