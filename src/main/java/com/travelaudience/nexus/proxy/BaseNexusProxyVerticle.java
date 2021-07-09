@@ -24,6 +24,7 @@ public abstract class BaseNexusProxyVerticle extends AbstractVerticle {
     private static final Boolean ENFORCE_HTTPS = Boolean.parseBoolean(System.getenv("ENFORCE_HTTPS"));
     private static final String UPSTREAM_HOST = System.getenv("UPSTREAM_HOST");
     private static final Integer UPSTREAM_HTTP_PORT = Ints.tryParse(System.getenv("UPSTREAM_HTTP_PORT"));
+    private static final Boolean PASSTHRU_AUTH_HEADER = Boolean.parseBoolean(System.getenv("PASSTHRU_AUTH_HEADER"));
     private static final CharSequence X_FORWARDED_PROTO = HttpHeaders.createOptimized("X-Forwarded-Proto");
     protected final String nexusHttpHost = System.getenv("NEXUS_HTTP_HOST");
 
@@ -34,7 +35,8 @@ public abstract class BaseNexusProxyVerticle extends AbstractVerticle {
         final NexusHttpProxy httpProxy = NexusHttpProxy.create(
                 vertx,
                 UPSTREAM_HOST,
-                UPSTREAM_HTTP_PORT);
+                UPSTREAM_HTTP_PORT,
+                PASSTHRU_AUTH_HEADER);
         final Router router = Router.router(
                 vertx
         );
