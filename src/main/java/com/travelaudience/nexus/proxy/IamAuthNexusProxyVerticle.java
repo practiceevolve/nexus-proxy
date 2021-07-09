@@ -59,6 +59,10 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
     private static final String AUTHORIZE_ENDPOINT = System.getenv("AUTHORIZE_ENDPOINT");
     private static final String REQUEST_SCOPES = System.getenv("REQUEST_SCOPES");
     private static final String USER_ID_CLAIM = System.getenv("USER_ID_CLAIM");
+    /**
+     * The path that corresponds to all possible paths within the Nexus Maven repositories.
+     */
+    private static final String REPOSITORY_PATH = Optional.ofNullable(System.getenv("REPOSITORY_PATH")).orElse("/repository/*");
 
     private static final String REDIRECT_URL = System.getenv("REDIRECT_URL");
     private static final Integer SESSION_TTL = Ints.tryParse(System.getenv("SESSION_TTL"));
@@ -76,10 +80,6 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
     private static final String CLI_CREDENTIALS_PATH = "/cli/credentials";
     private static final String CLI_CREDENTIALS_PATH_GRADLE = "/cli/credentials/gradle";
     private static final String CLI_CREDENTIALS_PATH_NPM = "/cli/credentials/npm";
-    /**
-     * The path that corresponds to all possible paths within the Nexus Maven repositories.
-     */
-    private static final String NEXUS_REPOSITORY_PATHS = "/repository/*";
 
     /**
      * The name of the parameters conveying the authorization code when {@code CALLBACK_PATH} is called.
@@ -142,7 +142,7 @@ public class IamAuthNexusProxyVerticle extends BaseNexusProxyVerticle {
     @Override
     protected void configureRouting(Router router) {
         // Enforce authentication for the Nexus UI and API.
-        router.route(NEXUS_REPOSITORY_PATHS).handler(VirtualHostHandler.create(nexusHttpHost, ctx -> {
+        router.route(REPOSITORY_PATH).handler(VirtualHostHandler.create(nexusHttpHost, ctx -> {
             if (ctx.request().headers().get(HttpHeaders.AUTHORIZATION) == null) {
                 LOGGER.debug("No authorization header found. Denying.");
                 ctx.response().putHeader(WWW_AUTHENTICATE_HEADER_NAME, WWW_AUTHENTICATE_HEADER_VALUE);

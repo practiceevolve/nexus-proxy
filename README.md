@@ -41,6 +41,7 @@ $ BIND_PORT="8080" \
   CLIENT_ID="my-client-id" \
   CLIENT_SECRET="my-client-secret" \
   NEXUS_HTTP_HOST="nexus.example.com" \
+  REPOSITORY_PATH="/repository/*" \
   REDIRECT_URL="https://nexus.example.com/oauth/callback" \
   SESSION_TTL="1440000" \
   UPSTREAM_HTTP_PORT="8081" \
@@ -66,6 +67,7 @@ $ BIND_PORT="8080" \
 | `CLOUD_IAM_AUTH_ENABLED`            | Whether to enable authentication against an IDP. |
 | `LOG_LEVEL`                         | The desired log level (i.e., `trace`, `debug`, `info`, `warn` or `error`). Defaults to `info`. |
 | `NEXUS_HTTP_HOST`                   | The host used to access the Nexus UI and Maven repositories. |
+| `REPOSITORY_PATH`                   | Repository route serving data to CLI utilities like maven/nuget with http header authentication, defaults to /repository/* |
 | `REDIRECT_URL`                      | The URL where to redirect users after the OAuth2 consent screen. |
 | `SESSION_TTL`                       | The TTL (in _milliseconds_) of a user's session. |
 | `UPSTREAM_HTTP_PORT`                | The port where the proxied Nexus instance listens. |

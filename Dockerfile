@@ -13,6 +13,7 @@ ENV BIND_HOST="0.0.0.0" \
     CLIENT_SECRET="REPLACE_ME" \
     CLOUD_IAM_AUTH_ENABLED="true" \
     NEXUS_HTTP_HOST="nexus.example.com" \
+    REPOSITORY_PATH="/repository/*" \
     REDIRECT_URL="<oauth-callback>" \
     SESSION_TTL="1440000" \
     UPSTREAM_HOST="localhost" \
